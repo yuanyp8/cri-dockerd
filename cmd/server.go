@@ -184,9 +184,14 @@ func RunCriDockerd(f *options.DockerCRIFlags, stopCh <-chan struct{}) error {
 
 	// Initialize streaming configuration. (Not using TLS now)
 	streamingConfig := &streaming.Config{
-		// Use a relative redirect (no scheme or host).
-		BaseURL:                         &url.URL{Path: "/cri/"},
-		Addr:                            resolvedAddr,
+		// Explicit scheme + host so kubelet 1.36 (UpgradeAwareHandler) does not
+		// misinterpret the scheme-less relative URL as HTTPS. See Mirantis/cri-dockerd#569.
+		BaseURL: &url.URL{
+			Scheme: "http",
+			Host:   resolvedAddr,
+			Path:   "/cri/",
+		},
+		Addr: resolvedAddr,
 		StreamIdleTimeout:               r.StreamingConnectionIdleTimeout.Duration,
 		StreamCreationTimeout:           streaming.DefaultConfig.StreamCreationTimeout,
 		SupportedRemoteCommandProtocols: streaming.DefaultConfig.SupportedRemoteCommandProtocols,

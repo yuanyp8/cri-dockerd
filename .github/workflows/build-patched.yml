@@ -1,0 +1,51 @@
+name: build-patched-cri-dockerd
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build cri-dockerd (BaseURL scheme+host patch)
+        run: |
+          set -euo pipefail
+          # Patch for Mirantis/cri-dockerd#569: use explicit scheme+host in the
+          # streaming BaseURL so kubelet 1.36 UpgradeAwareHandler does not treat
+          # the scheme-less relative URL as HTTPS.
+          grep -q 'Scheme: "http"' cmd/server.go || {
+            echo "patch missing from cmd/server.go" >&2; exit 1; }
+          mkdir -p /tmp/cri-dockerd-bin
+          GOOS=linux GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build -o /tmp/cri-dockerd-bin/cri-dockerd ./
+
+      - name: Package tarball (upstream naming cri-dockerd/<arch>/.../cri-dockerd)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cri-dockerd-pkg/cri-dockerd
+          mv /tmp/cri-dockerd-bin/cri-dockerd /tmp/cri-dockerd-pkg/cri-dockerd/cri-dockerd
+          tar -czf cri-dockerd-0.4.6.${{ matrix.goarch }}.tgz -C /tmp/cri-dockerd-pkg cri-dockerd
+          sha256sum cri-dockerd-0.4.6.${{ matrix.goarch }}.tgz
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.4.6-archinfra
+          name: cri-dockerd v0.4.6 (archinfra exec fix)
+          body: |
+            Patched cri-dockerd v0.4.6: streaming `BaseURL` now sets explicit
+            `Scheme: http` + `Host`, fixing `kubectl exec` failure
+            ("server gave HTTP response to HTTPS client") with kubelet 1.36.
+            Ref: Mirantis/cri-dockerd#569.
+          files: cri-dockerd-0.4.6.${{ matrix.goarch }}.tgz
+          generate_release_notes: false
